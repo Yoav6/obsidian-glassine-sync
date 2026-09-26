@@ -1,0 +1,20 @@
+{
+	"name": "obsidian-glassine-sync",
+	"version": "0.1.0",
+	"description": "Sync selected Obsidian notes with a self-hosted Glassine instance over its REST sync API.",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "node esbuild.config.mjs",
+		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"check": "tsc -noEmit -skipLibCheck"
+	},
+	"license": "MIT",
+	"devDependencies": {
+		"@types/node": "^22.10.0",
+		"builtin-modules": "^4.0.0",
+		"esbuild": "^0.24.0",
+		"obsidian": "^1.7.2",
+		"typescript": "^5.7.2"
+	}
+}
