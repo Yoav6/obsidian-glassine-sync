@@ -1,7 +1,7 @@
 {
 	"id": "glassine-sync",
 	"name": "Glassine Sync",
-	"version": "0.1.0",
+	"version": "1.0.0",
 	"minAppVersion": "1.4.4",
 	"description": "Sync selected notes with a self-hosted Glassine instance over its REST sync API - no git required, works on desktop and mobile.",
 	"author": "Yoav Ravid",
