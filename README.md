@@ -8,6 +8,7 @@ An Obsidian plugin that syncs selected notes with a self-hosted Glassine instanc
 - Edits sync to Glassine shortly after you stop typing. Accepted edits and other changes made on Glassine are pulled back down on note open and on a timer.
 - Pair as many vaults as you like — each one pairs independently and shows up as its own row in Glassine's Admin → Devices, where you can revoke it at any time.
 - No conflict resolution: syncing promptly on every change keeps the window for a real collision small, and the rare conflict resolves as last-write-wins.
+- Embedded images sync too, in either direction — both Obsidian's `![[wiki-style]]` embeds and plain `![](path)` markdown images. Pushed images are uploaded and the outgoing text rewritten to plain markdown (the only form Glassine's own renderer understands); pulled images are downloaded to the same vault-relative path the document's markdown names. Only the copy sent to Glassine is rewritten — a note's own embed syntax on disk is never touched.
 
 See `documentation/sync-api.md` in the Glassine server's repository for the protocol this plugin speaks — it's a general-purpose API, not specific to Obsidian, if you'd rather write your own client.
 

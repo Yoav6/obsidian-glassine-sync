@@ -81,4 +81,33 @@ export class GlassineClient {
 			url: string;
 		};
 	}
+
+	private assetEndpoint(vaultPath: string): string {
+		const encoded = vaultPath
+			.split('/')
+			.map((part) => encodeURIComponent(part))
+			.join('/');
+		return this.endpoint(`/api/sync/assets/${encoded}`);
+	}
+
+	async pullAsset(vaultPath: string): Promise<ArrayBuffer> {
+		const res = await requestUrl({ url: this.assetEndpoint(vaultPath), method: 'GET', headers: this.headers(), throw: false });
+		if (res.status < 200 || res.status >= 300) {
+			throw new GlassineApiError(`Download of "${vaultPath}" failed (${res.status})`);
+		}
+		return res.arrayBuffer;
+	}
+
+	async pushAsset(vaultPath: string, data: ArrayBuffer, contentType: string): Promise<void> {
+		const res = await requestUrl({
+			url: this.assetEndpoint(vaultPath),
+			method: 'POST',
+			headers: { ...this.headers(), 'Content-Type': contentType },
+			body: data,
+			throw: false
+		});
+		if (res.status < 200 || res.status >= 300) {
+			throw new GlassineApiError(`Upload of "${vaultPath}" failed (${res.status})`);
+		}
+	}
 }

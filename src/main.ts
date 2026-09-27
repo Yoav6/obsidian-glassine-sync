@@ -12,8 +12,7 @@ export default class GlassineSyncPlugin extends Plugin {
 		await this.loadSettings();
 
 		this.engine = new SyncEngine(
-			this.app.vault,
-			this.app.fileManager,
+			this.app,
 			() => (this.settings.serverUrl && this.settings.token ? this.client() : null),
 			() => this.settings.property
 		);

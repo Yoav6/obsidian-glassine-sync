@@ -1,4 +1,5 @@
-import { Notice, TFile, Vault, type FileManager } from 'obsidian';
+import { Notice, TFile, type App } from 'obsidian';
+import { applyIncomingImages, resolveOutgoingImages } from './assets';
 import { GlassineApiError, type GlassineClient } from './api';
 import { readSyncProperty, setSyncProperty, slugFromUrl, stripSyncProperty } from './frontmatter';
 
@@ -14,18 +15,30 @@ const CREATE_GRACE_MS = 5000;
 /**
  * Owns the actual sync behaviour: which files are selected (the frontmatter
  * property), matching them to Glassine documents, and pushing/pulling
- * content. Kept independent of Obsidian's `Plugin` lifecycle so it's easy to
- * reason about on its own.
+ * content (including embedded images). Kept independent of Obsidian's
+ * `Plugin` lifecycle so it's easy to reason about on its own.
  */
 export class SyncEngine {
-	/** The last content (property stripped) this plugin knows the server has, per vault path — the loop guard for both push and pull. */
+	/**
+	 * The raw local content (property stripped, embeds left in whatever syntax
+	 * Obsidian wrote them) as of the last successful push or pull. A cheap,
+	 * image-free check: if a fresh read matches this, nothing local actually
+	 * changed, so there's no reason to even look at embedded images.
+	 */
+	private lastSyncedLocalContent = new Map<string, string>();
+	/**
+	 * The content this plugin believes the server currently holds — after
+	 * translation to Glassine's plain markdown embed syntax. Comparing a fresh
+	 * pull against this (rather than against live local content) is what lets
+	 * a note keep its own wiki-embed syntax locally without every pull
+	 * mistaking that syntax difference for a real change and rewriting it.
+	 */
 	private lastKnownServerContent = new Map<string, string>();
 	private pushTimers = new Map<string, number>();
 	private createTimers = new Map<string, number>();
 
 	constructor(
-		private vault: Vault,
-		private fileManager: FileManager,
+		private app: App,
 		private getClient: () => GlassineClient | null,
 		private getProperty: () => string
 	) {}
@@ -46,7 +59,7 @@ export class SyncEngine {
 		const client = this.getClient();
 		if (!client) return;
 		const property = this.getProperty();
-		const content = await this.vault.read(file);
+		const content = await this.app.vault.read(file);
 		const sync = readSyncProperty(content, property);
 		if (!sync.present) return;
 
@@ -60,11 +73,13 @@ export class SyncEngine {
 		}
 		this.cancelPendingCreate(file.path);
 
-		const payload = stripSyncProperty(content, property);
-		if (this.lastKnownServerContent.get(file.path) === payload) return;
+		const localPayload = stripSyncProperty(content, property);
+		if (this.lastSyncedLocalContent.get(file.path) === localPayload) return;
 		try {
-			await client.push(slug, payload);
-			this.lastKnownServerContent.set(file.path, payload);
+			const outgoing = await resolveOutgoingImages(this.app, file.path, localPayload, client);
+			await client.push(slug, outgoing);
+			this.lastSyncedLocalContent.set(file.path, localPayload);
+			this.lastKnownServerContent.set(file.path, outgoing);
 		} catch (err) {
 			this.reportError(file, err);
 		}
@@ -90,31 +105,33 @@ export class SyncEngine {
 		const client = this.getClient();
 		if (!client) return;
 		const property = this.getProperty();
-		const content = await this.vault.read(file);
+		const content = await this.app.vault.read(file);
 		const sync = readSyncProperty(content, property);
 		// The property may have been removed, or resolved to a real document,
 		// while we were waiting — either way there's nothing to create.
 		if (!sync.present || (sync.value && slugFromUrl(sync.value))) return;
 
-		const payload = stripSyncProperty(content, property);
+		const localPayload = stripSyncProperty(content, property);
 		try {
-			const result = await client.create(file.name, payload);
-			await this.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+			const outgoing = await resolveOutgoingImages(this.app, file.path, localPayload, client);
+			const result = await client.create(file.name, outgoing);
+			await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
 				fm[property] = result.url;
 			});
-			this.lastKnownServerContent.set(file.path, payload);
+			this.lastSyncedLocalContent.set(file.path, localPayload);
+			this.lastKnownServerContent.set(file.path, outgoing);
 		} catch (err) {
 			this.reportError(file, err);
 		}
 	}
 
-	/** Pulls the current server content into a paired file, if it's changed. Returns whether the file was written to. */
+	/** Pulls the current server content (and any embedded images) into a paired file, if it's changed. */
 	async pullFile(file: TFile): Promise<boolean> {
 		if (file.extension !== 'md') return false;
 		const client = this.getClient();
 		if (!client) return false;
 		const property = this.getProperty();
-		const content = await this.vault.read(file);
+		const content = await this.app.vault.read(file);
 		const sync = readSyncProperty(content, property);
 		if (!sync.present || !sync.value) return false;
 		const slug = slugFromUrl(sync.value);
@@ -122,14 +139,15 @@ export class SyncEngine {
 
 		try {
 			const remote = await client.pull(slug);
-			const localPayload = stripSyncProperty(content, property);
-			if (remote.content === localPayload) {
-				this.lastKnownServerContent.set(file.path, remote.content);
-				return false;
-			}
+			if (this.lastKnownServerContent.get(file.path) === remote.content) return false;
+			await applyIncomingImages(this.app, remote.content, client);
 			const next = setSyncProperty(remote.content, property, sync.value);
 			this.lastKnownServerContent.set(file.path, remote.content);
-			await this.vault.modify(file, next);
+			// The file's body is about to become exactly `remote.content` — record
+			// that as already-synced so the modify event this write fires doesn't
+			// look like a pending local edit and trigger a redundant push.
+			this.lastSyncedLocalContent.set(file.path, remote.content);
+			await this.app.vault.modify(file, next);
 			return true;
 		} catch (err) {
 			this.reportError(file, err);
