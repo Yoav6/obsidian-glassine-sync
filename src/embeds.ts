@@ -1,9 +1,19 @@
 /**
  * Finding image embeds in note text — pure string logic, no Obsidian API, so
- * it's easy to test on its own. Glassine's own renderer only understands
- * plain markdown `![]()` embeds (see documentation/sync-api.md on the
- * server), so content pushed there needs Obsidian's `![[wiki-style]]` embeds
- * translated; content pulled from there is always already plain markdown.
+ * it's easy to test on its own. Glassine understands both plain markdown
+ * `![]()` and Obsidian's own `![[wiki-style]]` embeds natively (see
+ * documentation/sync-api.md on the server), so pushing an embed never needs
+ * to change its syntax — only its path, since a wiki-embed's link may rely on
+ * Obsidian's vault-wide fuzzy filename resolution, which Glassine doesn't
+ * have, so it's substituted for the fully-resolved vault path before pushing.
+ *
+ * Only wiki-style embeds are treated as local images to upload on push. A
+ * plain `![]()` markdown image is left exactly as written and never uploaded
+ * — it's far more likely to already be a URL Glassine can display as-is (its
+ * renderer resolves an absolute URL directly) than a local file the user
+ * wants duplicated onto the server. Pulling is unaffected by that
+ * restriction: content coming *from* Glassine may contain either syntax
+ * (whatever's actually stored), and both are downloaded the same way.
  */
 
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif', 'bmp', 'ico']);
@@ -49,28 +59,23 @@ function* markdownImageEmbeds(content: string): Generator<ImageEmbed> {
 	}
 }
 
-/** Every local image embed in a note, in whichever syntax Obsidian wrote it. */
+/** Local images to upload on push — wiki-style embeds only (see the module doc comment for why). */
 export function extractLocalImageEmbeds(content: string): ImageEmbed[] {
+	return [...wikiImageEmbeds(content)];
+}
+
+/** Local image embeds already naming a real, resolved vault path — everything a pulled document might contain, in either syntax. */
+export function extractPlainImageEmbeds(content: string): ImageEmbed[] {
 	return [...wikiImageEmbeds(content), ...markdownImageEmbeds(content)];
 }
 
-/** Local image embeds already in Glassine's own markdown form — all a pulled document will ever contain. */
-export function extractPlainImageEmbeds(content: string): ImageEmbed[] {
-	return [...markdownImageEmbeds(content)];
-}
-
 /**
- * `encodeURIComponent` leaves `(` and `)` unescaped, which breaks this
- * module's own (non-CommonMark, no-balanced-parens) link destination regex —
- * and a colliding filename gets a literal `" (2)"` suffix from Glassine's own
- * `uniqueAssetRelativePath`, so this isn't a hypothetical case.
+ * The wiki-embed Glassine understands natively, for a resolved vault-relative
+ * path — Glassine's own wiki-embed resolution always treats the path as
+ * vault-root-relative (see the server's images.ts), matching how a fully
+ * resolved Obsidian link path already works, so no leading-slash marker or
+ * percent-encoding is needed the way plain markdown links require.
  */
-function encodePathSegment(part: string): string {
-	return encodeURIComponent(part).replace(/[()]/g, (c) => (c === '(' ? '%28' : '%29'));
-}
-
-/** The markdown embed Glassine's renderer understands, for a resolved vault-relative path. */
-export function markdownEmbed(vaultPath: string, alias: string | null): string {
-	const encoded = vaultPath.split('/').map(encodePathSegment).join('/');
-	return `![${alias ?? ''}](${encoded})`;
+export function wikiEmbed(vaultPath: string, alias: string | null): string {
+	return alias ? `![[${vaultPath}|${alias}]]` : `![[${vaultPath}]]`;
 }

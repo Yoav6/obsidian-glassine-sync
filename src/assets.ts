@@ -1,6 +1,6 @@
 import { TFile, type App } from 'obsidian';
 import type { GlassineClient } from './api';
-import { extractLocalImageEmbeds, extractPlainImageEmbeds, markdownEmbed } from './embeds';
+import { extractLocalImageEmbeds, extractPlainImageEmbeds, wikiEmbed } from './embeds';
 
 function dirname(path: string): string {
 	const idx = path.lastIndexOf('/');
@@ -37,10 +37,14 @@ function contentTypeFor(extension: string): string {
 }
 
 /**
- * Uploads every local image a note embeds — wiki- or markdown-style — and
- * rewrites the *outgoing* text to Glassine's own plain markdown embed syntax,
- * the only form its renderer understands. The local file itself, and its own
- * embed syntax, are never touched.
+ * Uploads every wiki-style local image a note embeds, and rewrites the
+ * *outgoing* text's link to the image's fully-resolved vault path — the
+ * embed's own `![[wiki-style]]` syntax is kept as-is, since Glassine
+ * understands it natively; only the path needs resolving, because it may
+ * rely on Obsidian's vault-wide fuzzy filename matching, which Glassine has
+ * no equivalent of. A plain `![]()` markdown image is left untouched — see
+ * embeds.ts for why. The local file itself, and its own embed syntax, are
+ * never touched either way.
  */
 export async function resolveOutgoingImages(
 	app: App,
@@ -56,16 +60,17 @@ export async function resolveOutgoingImages(
 		if (!(target instanceof TFile)) continue;
 		const data = await app.vault.readBinary(target);
 		await client.pushAsset(target.path, data, contentTypeFor(target.extension));
-		next = next.split(embed.raw).join(markdownEmbed(target.path, embed.alias));
+		next = next.split(embed.raw).join(wikiEmbed(target.path, embed.alias));
 	}
 	return next;
 }
 
 /**
- * Downloads every local image a pulled document embeds, writing or updating
- * it at the vault-relative path Glassine's markdown already names. A failed
- * download for one embed (e.g. a stale/unresolvable reference) is skipped
- * rather than failing the whole pull.
+ * Downloads every local image a pulled document embeds — plain markdown or
+ * wiki-style, whichever the document actually contains — writing or updating
+ * it at the vault-relative path Glassine already names. A failed download for
+ * one embed (e.g. a stale/unresolvable reference) is skipped rather than
+ * failing the whole pull.
  */
 export async function applyIncomingImages(app: App, content: string, client: GlassineClient): Promise<void> {
 	for (const embed of extractPlainImageEmbeds(content)) {
